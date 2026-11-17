@@ -18,7 +18,7 @@ type Result struct {
 	FirstErr error
 }
 
-// ScanPorts scanns alle Ports 1-65535 auf einem Host mit mehreren Goroutinen.
+// ScanPorts scans alle Ports 1-65535 auf einem Host mit mehreren Goroutinen.
 func ScanPorts(ip string) Result {
 	res := Result{IP: ip}
 	ports := make(chan int, Workers)

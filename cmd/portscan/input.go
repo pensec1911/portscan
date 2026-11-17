@@ -12,7 +12,20 @@ const (
 	minPrefixBits = 16 // größer als /16 wird abgelehnt
 )
 
-// parseInput akzeptiert "
+// ---------- Validation ----------
+
+func isValidIPv4(ip string) bool {
+	adr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+	return adr.Is4()
+}
+
+func isValidPort(port int) bool {
+	return port > 0 && port <= 65535
+}
+
 type target struct {
 	ip     string
 	port   int          // 0 = alle Ports

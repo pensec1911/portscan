@@ -12,20 +12,6 @@ import (
 	"github.com/pensec1911/portscan/internal/scanner"
 )
 
-// ---------- Validation ----------
-
-func isValidIPv4(ip string) bool {
-	adr, err := netip.ParseAddr(ip)
-	if err != nil {
-		return false
-	}
-	return adr.Is4()
-}
-
-func isValidPort(port int) bool {
-	return port > 0 && port <= 65535
-}
-
 func printHostResult(r scanner.Result, took time.Duration) {
 	if len(r.Open) == 0 {
 		fmt.Printf("  %-15s no open TCP ports (%s)\n", r.IP, took.Round(time.Millisecond))
