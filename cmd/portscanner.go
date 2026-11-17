@@ -2,8 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,8 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/pensec1911/portscan/internal/scanner"
 )
 
 const (
@@ -26,14 +25,6 @@ const (
 
 // Ports that are probed during host discovery. If any of these ports is open or closed (not filtered), the host is considered alive.
 var discoveryPorts = []int{80, 443, 22, 445, 139, 8080, 3389, 53, 21, 23, 1716, 5000, 8443}
-
-type portState int
-
-const (
-	stateOpen portState = iota
-	stateClosed
-	stateFiltered
-)
 
 // ---------- Validation ----------
 
@@ -51,34 +42,6 @@ func isValidPort(port int) bool {
 
 // ---------- Single Port ----------
 
-// probePort tries to connect to a given IP and port with a timeout. It returns the port state (open, closed, filtered) and an error if an unexpected error occurs (e.g., "too many open files").
-// err is only returned for unexpected errors, not for normal port states.
-func probePort(ip string, port int, timeout time.Duration) (portState, error) {
-	target := net.JoinHostPort(ip, strconv.Itoa(port))
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", target)
-	if err == nil {
-		conn.Close()
-		return stateOpen, nil
-	}
-
-	var netErr net.Error
-	switch {
-	case errors.Is(err, syscall.ECONNREFUSED): // RST → Port zu, aber Host lebt
-		return stateClosed, nil
-	case errors.Is(err, syscall.EHOSTUNREACH), errors.Is(err, syscall.ENETUNREACH):
-		return stateFiltered, nil
-	case errors.Is(err, context.DeadlineExceeded),
-		errors.As(err, &netErr) && netErr.Timeout():
-		return stateFiltered, nil
-	default:
-		return stateFiltered, err
-	}
-}
-
 // ---------- Port-Scan eines Hosts ----------
 
 // scanPorts scanns alle Ports 1-65535 auf einem Host mit mehreren Goroutinen.
@@ -93,7 +56,7 @@ func scanPorts(ip string) (open []int, failed int, firstErr error) {
 		go func() {
 			defer wg.Done()
 			for p := range ports {
-				state, err := probePort(ip, p, dialTimeout)
+				state, err := scanner.ProbePort(ip, p, dialTimeout)
 				if err != nil {
 					mu.Lock()
 					failed++
@@ -103,7 +66,7 @@ func scanPorts(ip string) (open []int, failed int, firstErr error) {
 					mu.Unlock()
 					continue
 				}
-				if state == stateOpen {
+				if state == scanner.StateOpen {
 					results <- p
 				}
 			}
@@ -164,8 +127,8 @@ func hostsInPrefix(prefix netip.Prefix) []netip.Addr {
 // Open ports indicate that the host is reachable, while closed ports indicate that the host is reachable but the specific port is not open. Filtered ports (no response) do not provide conclusive evidence of the host's status.
 func isHostAlive(ip string) bool {
 	for _, p := range discoveryPorts {
-		state, _ := probePort(ip, p, discoveryTimeout)
-		if state == stateOpen || state == stateClosed {
+		state, _ := scanner.ProbePort(ip, p, discoveryTimeout)
+		if state == scanner.StateOpen || state == scanner.StateClosed {
 			return true
 		}
 	}
@@ -311,17 +274,17 @@ func parseInput(input string) (target, error) {
 }
 
 func main() {
-	scanner := bufio.NewScanner(os.Stdin)
+	in := bufio.NewScanner(os.Stdin)
 	var t target
 
 	for {
 		fmt.Print("Enter IPv4[:Port] or subnet (e.g. 192.168.178.0/24): ")
-		if !scanner.Scan() { // EOF (Ctrl+D) oder Lesefehler
+		if !in.Scan() { // EOF (Ctrl+D) oder Lesefehler
 			fmt.Println()
 			return
 		}
 		var err error
-		t, err = parseInput(strings.TrimSpace(scanner.Text()))
+		t, err = parseInput(strings.TrimSpace(in.Text()))
 		if err != nil {
 			fmt.Println("Invalid input:", err)
 			continue
@@ -340,13 +303,13 @@ func main() {
 		printHostResult(t.ip, open, failed, firstErr, time.Since(start))
 
 	default:
-		state, err := probePort(t.ip, t.port, dialTimeout)
+		state, err := scanner.ProbePort(t.ip, t.port, dialTimeout)
 		switch {
 		case err != nil:
 			fmt.Println("Error:", err)
-		case state == stateOpen:
+		case state == scanner.StateOpen:
 			fmt.Printf("Port %d is open\n", t.port)
-		case state == stateClosed:
+		case state == scanner.StateClosed:
 			fmt.Printf("Port %d is closed\n", t.port)
 		default:
 			fmt.Printf("Port %d is filtered (no response)\n", t.port)
